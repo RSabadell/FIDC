@@ -4,6 +4,9 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy import stats
+from scipy.stats import gaussian_kde
+from matplotlib.colors import LinearSegmentedColormap
 
 # Configuração básica da página
 st.set_page_config(
@@ -16,14 +19,9 @@ def load_data():
     try:
         df = pd.read_csv("Dashboard_Credito_BI.csv", sep=";", encoding='utf-8-sig')
     except:
-        # Se falhar com sep=";", tenta com vírgula
         df = pd.read_csv("Dashboard_Credito_BI.csv", encoding='utf-8-sig')
 
-    # ============================================================
-    # CRIAR COLUNAS DERIVADAS SE NÃO EXISTIREM
-    # ============================================================
-
-    # 1. REGIAO (mapear estados para regiões)
+    # Criar colunas derivadas se não existirem
     if 'Regiao' not in df.columns and 'Estado' in df.columns:
         regioes = {
             'Norte': ['AC', 'AP', 'AM', 'PA', 'RO', 'RR', 'TO'],
@@ -39,7 +37,6 @@ def load_data():
             return 'Outros'
         df['Regiao'] = df['Estado'].apply(map_regiao)
 
-    # 2. PERFIL_RISCO (baseado no score)
     if 'Perfil_Risco' not in df.columns and 'Score SERASA' in df.columns:
         def calcular_perfil(score):
             if pd.isna(score):
@@ -52,7 +49,6 @@ def load_data():
                 return 'Alto Risco'
         df['Perfil_Risco'] = df['Score SERASA'].apply(calcular_perfil)
 
-    # 3. FAIXA SCORE
     if 'Faixa Score' not in df.columns and 'Score SERASA' in df.columns:
         df['Faixa Score'] = pd.cut(
             df['Score SERASA'],
@@ -60,7 +56,6 @@ def load_data():
             labels=['0-300', '301-500', '501-700', '701-900', '901-1000']
         )
 
-    # 4. FAIXA IDADE
     if 'Faixa Idade' not in df.columns and 'Idade' in df.columns:
         df['Faixa Idade'] = pd.cut(
             df['Idade'],
@@ -68,11 +63,9 @@ def load_data():
             labels=['18-25', '26-35', '36-45', '46-55', '56+']
         )
 
-    # 5. APROVADO_FLAG
     if 'Aprovado_Flag' not in df.columns and 'Status' in df.columns:
         df['Aprovado_Flag'] = df['Status'].isin(['Aprovado', 'Contratado']).astype(int)
 
-    # 6. Garantir que Limite de Crédito e Renda Pres existam (mesmo que vazios)
     if 'Limite de Crédito' not in df.columns:
         df['Limite de Crédito'] = np.nan
     if 'Renda Pres' not in df.columns:
@@ -80,7 +73,6 @@ def load_data():
 
     return df
 
-# Carregar dados com tratamento de erro
 try:
     df = load_data()
     st.sidebar.success("✅ Dados carregados com sucesso!")
@@ -91,20 +83,17 @@ except Exception as e:
 
 st.title("📊 Dashboard Interativo - Portfólio de Crédito")
 
-# Verificar colunas essenciais
 colunas_essenciais = ['Score SERASA', 'Idade', 'Status', 'Valor Financiado']
 colunas_faltantes = [col for col in colunas_essenciais if col not in df.columns]
 
 if colunas_faltantes:
     st.error(f"❌ Colunas faltando no arquivo: {', '.join(colunas_faltantes)}")
-    st.info("Verifique se o arquivo CSV está correto")
     st.stop()
 
 # ===================== SIDEBAR – FILTROS =====================
 
 st.sidebar.header("🔍 Filtros")
 
-# Filtro de Status
 if 'Status' in df.columns:
     status_opts = sorted(df["Status"].dropna().unique())
     status_sel = st.sidebar.multiselect(
@@ -115,7 +104,6 @@ if 'Status' in df.columns:
 else:
     status_sel = []
 
-# Filtro de Região
 if 'Regiao' in df.columns:
     regiao_opts = sorted(df["Regiao"].dropna().unique())
     regiao_sel = st.sidebar.multiselect(
@@ -125,9 +113,7 @@ if 'Regiao' in df.columns:
     )
 else:
     regiao_sel = []
-    st.sidebar.warning("Coluna 'Estado' não encontrada")
 
-# Filtro de Faixa de Score
 if 'Faixa Score' in df.columns:
     faixa_score_opts = sorted([str(x) for x in df["Faixa Score"].dropna().unique()])
     faixa_score_sel = st.sidebar.multiselect(
@@ -138,7 +124,6 @@ if 'Faixa Score' in df.columns:
 else:
     faixa_score_sel = []
 
-# Filtro de Faixa de Idade
 if 'Faixa Idade' in df.columns:
     faixa_idade_opts = sorted([str(x) for x in df["Faixa Idade"].dropna().unique()])
     faixa_idade_sel = st.sidebar.multiselect(
@@ -197,14 +182,173 @@ with c4:
     else:
         st.metric("Valor Total", "N/A")
 
+# ===================== RIDGE PLOT POR ESTADO =====================
+
+st.header("🏔️ Ridge Plot - Distribuição de Score por Estado")
+
+st.info("💡 Estados ordenados por score médio. Cores indicam performance: vermelho (baixo) → verde (alto)")
+
+if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
+
+    # Configurações do ridge plot
+    col_ridge1, col_ridge2, col_ridge3 = st.columns(3)
+
+    with col_ridge1:
+        min_obs_ridge = st.slider(
+            "Mínimo de observações por estado",
+            min_value=10,
+            max_value=100,
+            value=30,
+            step=10,
+            help="Estados com menos observações serão excluídos"
+        )
+
+    with col_ridge2:
+        var_ridge = st.selectbox(
+            "Variável para Ridge Plot",
+            ["Score SERASA", "Idade", "Valor Financiado"],
+            help="Escolha qual variável analisar por estado"
+        )
+
+    with col_ridge3:
+        tema_ridge = st.selectbox(
+            "Tema de cores",
+            ["Gradiente Performance", "Fundo Escuro", "Seaborn"],
+            help="Estilo visual do gráfico"
+        )
+
+    # Preparar dados
+    df_ridge = df_filt[['Estado', var_ridge]].dropna()
+
+    # Filtrar estados com amostra mínima
+    estados_contagem = df_ridge.groupby('Estado')[var_ridge].count()
+    estados_validos = estados_contagem[estados_contagem >= min_obs_ridge].index
+
+    df_ridge = df_ridge[df_ridge['Estado'].isin(estados_validos)]
+
+    if len(estados_validos) < 3:
+        st.warning(f"⚠️ Apenas {len(estados_validos)} estado(s) com mínimo de {min_obs_ridge} observações. Reduza o mínimo.")
+    else:
+        # Calcular média por estado e ordenar
+        score_medio = df_ridge.groupby('Estado')[var_ridge].mean().sort_values()
+        ordem_estados = score_medio.index
+        n_estados = len(ordem_estados)
+
+        # Normalizar valores se for Score (0-10 scale)
+        if var_ridge == "Score SERASA":
+            df_ridge['Valor_norm'] = df_ridge[var_ridge] / 100.0
+            x_label = f'{var_ridge} (0-10)'
+            x_max = 10
+        else:
+            df_ridge['Valor_norm'] = df_ridge[var_ridge]
+            x_label = var_ridge
+            x_max = df_ridge['Valor_norm'].max()
+
+        # Criar figura
+        if tema_ridge == "Fundo Escuro":
+            fig_ridge, ax_ridge = plt.subplots(figsize=(12, max(8, n_estados * 0.4)))
+            fig_ridge.patch.set_facecolor('#1a1a1a')
+            ax_ridge.set_facecolor('#1a1a1a')
+            text_color = 'white'
+            grid_color = 'white'
+            grid_alpha = 0.15
+        else:
+            fig_ridge, ax_ridge = plt.subplots(figsize=(12, max(8, n_estados * 0.4)))
+            fig_ridge.patch.set_facecolor('white')
+            ax_ridge.set_facecolor('white')
+            text_color = 'black'
+            grid_color = 'gray'
+            grid_alpha = 0.3
+
+        # Gradiente de cores
+        if tema_ridge == "Seaborn":
+            cores = sns.color_palette("husl", n_estados)
+        else:
+            colors_list = ['#8B0000', '#CD5C5C', '#FF6347', '#FF8C00', '#FFA500', 
+                          '#FFD700', '#FFFF00', '#ADFF2F', '#7FFF00', '#00FF00', '#228B22']
+            cmap = LinearSegmentedColormap.from_list('score_gradient', colors_list, N=n_estados)
+            cores = [cmap(i/n_estados) for i in range(n_estados)]
+
+        # Grid
+        x_range = np.linspace(0, x_max, 500)
+        spacing = 0.8
+
+        # Plotar cada estado
+        for i, (estado, cor) in enumerate(zip(ordem_estados, cores)):
+            dados = df_ridge.loc[df_ridge['Estado'] == estado, 'Valor_norm'].dropna()
+
+            if len(dados) < 5:
+                continue
+
+            # Calcular KDE
+            try:
+                kde = gaussian_kde(dados, bw_method=0.15)
+                density = kde(x_range)
+                density = density / density.max() * 0.7  # Normalizar altura
+            except:
+                continue
+
+            y_base = i * spacing
+
+            # Plotar ridge
+            ax_ridge.fill_between(x_range, y_base, y_base + density, 
+                                 color=cor, alpha=0.85, linewidth=0.5, 
+                                 edgecolor=text_color if tema_ridge == "Fundo Escuro" else 'black')
+
+            ax_ridge.plot(x_range, y_base + density, color=text_color, 
+                         linewidth=0.3, alpha=0.6)
+
+            # Labels
+            media_estado = dados.mean() * (100 if var_ridge == "Score SERASA" else 1)
+            ax_ridge.text(-0.3, y_base + 0.35, f'{estado}', 
+                        va='center', ha='right', fontsize=9, 
+                        color=text_color, weight='bold')
+            ax_ridge.text(x_max + 0.3, y_base + 0.35, f'{media_estado:.0f}', 
+                        va='center', ha='left', fontsize=8, color=text_color)
+
+        # Configurar eixos
+        ax_ridge.set_xlim(-0.5, x_max + 0.5)
+        ax_ridge.set_ylim(-0.5, n_estados * spacing)
+
+        # Grid vertical
+        if var_ridge == "Score SERASA":
+            for x in range(11):
+                ax_ridge.axvline(x, color=grid_color, alpha=grid_alpha, 
+                               linewidth=0.5, linestyle='-')
+            ax_ridge.set_xticks(range(11))
+        else:
+            ax_ridge.grid(axis='x', alpha=grid_alpha)
+
+        ax_ridge.set_xlabel(x_label, fontsize=11, color=text_color, weight='bold')
+        ax_ridge.set_xticklabels(ax_ridge.get_xticks(), color=text_color, fontsize=9)
+        ax_ridge.set_yticks([])
+
+        for spine in ax_ridge.spines.values():
+            spine.set_visible(False)
+
+        ax_ridge.text(x_max/2, n_estados * spacing + 0.5, 
+                    f'Distribuição de {var_ridge} por Estado', 
+                    ha='center', fontsize=14, color=text_color, weight='bold')
+
+        plt.tight_layout()
+        st.pyplot(fig_ridge)
+
+        # Estatísticas
+        with st.expander("📊 Estatísticas por Estado"):
+            stats_estado = df_ridge.groupby('Estado')[var_ridge].agg(['count', 'mean', 'median', 'std']).round(2)
+            stats_estado.columns = ['Contagem', 'Média', 'Mediana', 'Desvio Padrão']
+            stats_estado = stats_estado.sort_values('Média', ascending=False)
+            st.dataframe(stats_estado, use_container_width=True)
+
+else:
+    st.warning("⚠️ Colunas 'Estado' e 'Score SERASA' necessárias para Ridge Plot")
+
 # ===================== KDE CONFIGURÁVEL =====================
 
 st.header("📉 Distribuições (KDE)")
 
-st.info("💡 **Importante**: Desmarcando 'Normalizar', as curvas mantêm proporções reais. "
-        "Categorias com mais observações terão curvas maiores.")
+st.info("💡 Desmarcando 'Normalizar', as curvas mantêm proporções reais.")
 
-# Selecionar variáveis disponíveis
 variaveis_disponiveis = []
 for var in ["Score SERASA", "Idade", "Limite de Crédito", "Renda Pres", "Valor Financiado"]:
     if var in df_filt.columns:
@@ -217,82 +361,76 @@ for seg in ["Status", "Regiao", "Faixa Score", "Faixa Idade", "Perfil_Risco"]:
 
 if not variaveis_disponiveis or not segmentacoes_disponiveis:
     st.warning("⚠️ Dados insuficientes para gerar gráficos KDE")
-    st.stop()
-
-cl, cr = st.columns(2)
-
-with cl:
-    var_x = st.selectbox(
-        "Variável contínua para o eixo X",
-        variaveis_disponiveis,
-    )
-
-with cr:
-    hue = st.selectbox(
-        "Segmentar por (hue)",
-        segmentacoes_disponiveis,
-    )
-
-# Opção de normalização
-col_norm1, col_norm2 = st.columns([2, 1])
-with col_norm1:
-    normalizar = st.checkbox(
-        "Normalizar curvas (cada curva com área = 1)", 
-        value=False,
-        help="Quando desmarcado, mantém as proporções reais entre categorias"
-    )
-
-with col_norm2:
-    if normalizar:
-        st.caption("🔄 Modo: Densidades normalizadas")
-    else:
-        st.caption("📊 Modo: Frequências reais")
-
-# Plotar KDE
-fig, ax = plt.subplots(figsize=(10, 5))
-
-categorias_plotadas = 0
-for cat in df_filt[hue].dropna().unique():
-    serie = df_filt.loc[df_filt[hue] == cat, var_x].dropna()
-
-    if len(serie) > 5:
-        categorias_plotadas += 1
-        if normalizar:
-            sns.kdeplot(
-                serie,
-                label=f"{cat} (n={len(serie)})",
-                fill=True,
-                alpha=0.25,
-                linewidth=1.5,
-                ax=ax,
-            )
-        else:
-            from scipy import stats
-            try:
-                kde = stats.gaussian_kde(serie)
-                x_range = np.linspace(serie.min(), serie.max(), 200)
-                density = kde(x_range)
-                frequency = density * len(serie)
-
-                ax.plot(x_range, frequency, label=f"{cat} (n={len(serie)})", linewidth=1.5)
-                ax.fill_between(x_range, frequency, alpha=0.25)
-            except:
-                # Fallback para dados problemáticos
-                st.warning(f"⚠️ Não foi possível calcular KDE para categoria: {cat}")
-
-if categorias_plotadas == 0:
-    st.warning("⚠️ Nenhuma categoria tem dados suficientes para plotar (mínimo 5 observações)")
 else:
-    ax.set_xlabel(var_x, fontsize=11)
-    ax.set_ylabel('Frequência aproximada' if not normalizar else 'Densidade', fontsize=11)
-    ax.legend(title=hue, fontsize=9)
-    ax.grid(alpha=0.3)
-    st.pyplot(fig)
+    cl, cr = st.columns(2)
 
-# Mostrar contagens
-with st.expander("📊 Ver contagem de observações por categoria"):
-    counts = df_filt[hue].value_counts().sort_index()
-    st.dataframe(counts.to_frame('Contagem'))
+    with cl:
+        var_x = st.selectbox(
+            "Variável contínua para o eixo X",
+            variaveis_disponiveis,
+        )
+
+    with cr:
+        hue = st.selectbox(
+            "Segmentar por (hue)",
+            segmentacoes_disponiveis,
+        )
+
+    col_norm1, col_norm2 = st.columns([2, 1])
+    with col_norm1:
+        normalizar = st.checkbox(
+            "Normalizar curvas (cada curva com área = 1)", 
+            value=False,
+            help="Quando desmarcado, mantém as proporções reais entre categorias"
+        )
+
+    with col_norm2:
+        if normalizar:
+            st.caption("🔄 Modo: Densidades normalizadas")
+        else:
+            st.caption("📊 Modo: Frequências reais")
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    categorias_plotadas = 0
+    for cat in df_filt[hue].dropna().unique():
+        serie = df_filt.loc[df_filt[hue] == cat, var_x].dropna()
+
+        if len(serie) > 5:
+            categorias_plotadas += 1
+            if normalizar:
+                sns.kdeplot(
+                    serie,
+                    label=f"{cat} (n={len(serie)})",
+                    fill=True,
+                    alpha=0.25,
+                    linewidth=1.5,
+                    ax=ax,
+                )
+            else:
+                try:
+                    kde = stats.gaussian_kde(serie)
+                    x_range = np.linspace(serie.min(), serie.max(), 200)
+                    density = kde(x_range)
+                    frequency = density * len(serie)
+
+                    ax.plot(x_range, frequency, label=f"{cat} (n={len(serie)})", linewidth=1.5)
+                    ax.fill_between(x_range, frequency, alpha=0.25)
+                except:
+                    st.warning(f"⚠️ Não foi possível calcular KDE para: {cat}")
+
+    if categorias_plotadas == 0:
+        st.warning("⚠️ Nenhuma categoria com dados suficientes (mínimo 5 observações)")
+    else:
+        ax.set_xlabel(var_x, fontsize=11)
+        ax.set_ylabel('Frequência aproximada' if not normalizar else 'Densidade', fontsize=11)
+        ax.legend(title=hue, fontsize=9)
+        ax.grid(alpha=0.3)
+        st.pyplot(fig)
+
+    with st.expander("📊 Ver contagem de observações por categoria"):
+        counts = df_filt[hue].value_counts().sort_index()
+        st.dataframe(counts.to_frame('Contagem'))
 
 # ===================== ANÁLISES CRUZADAS =====================
 
@@ -300,7 +438,6 @@ st.header("🔀 Análises cruzadas")
 
 col1, col2 = st.columns(2)
 
-# Score por Status
 with col1:
     if 'Status' in df_filt.columns and 'Score SERASA' in df_filt.columns:
         st.subheader("Score por Status")
@@ -313,7 +450,6 @@ with col1:
                     sns.kdeplot(serie, label=f"{s} (n={len(serie)})", 
                                fill=True, alpha=0.25, ax=ax1)
                 else:
-                    from scipy import stats
                     kde = stats.gaussian_kde(serie)
                     x_range = np.linspace(serie.min(), serie.max(), 200)
                     density = kde(x_range)
@@ -327,7 +463,6 @@ with col1:
         ax1.grid(alpha=0.3)
         st.pyplot(fig1)
 
-# Idade por Perfil de Risco
 with col2:
     if 'Perfil_Risco' in df_filt.columns and 'Idade' in df_filt.columns:
         st.subheader("Idade por Perfil de Risco")
@@ -340,7 +475,6 @@ with col2:
                     sns.kdeplot(serie, label=f"{p} (n={len(serie)})", 
                                fill=True, alpha=0.25, ax=ax2)
                 else:
-                    from scipy import stats
                     kde = stats.gaussian_kde(serie)
                     x_range = np.linspace(serie.min(), serie.max(), 200)
                     density = kde(x_range)
