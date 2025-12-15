@@ -279,8 +279,8 @@ if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
         # Desenhar linha branca por cima
         g.map(sns.kdeplot, "valor", 
               clip_on=False, 
-              color="w", 
-              lw=1, 
+              color="b", 
+              lw=.5, 
               bw_adjust=bw_adjust_val)
 
         # Linha de referência em y=0
