@@ -264,7 +264,7 @@ if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
             row="Estado_ord", 
             hue="Estado_ord", 
             aspect=15, 
-            height=0.75, 
+            height=0.5, 
             palette=pal
         )
 
