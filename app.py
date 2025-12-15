@@ -273,18 +273,18 @@ if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
               bw_adjust=bw_adjust_val, 
               clip_on=False,
               fill=True, 
-              alpha=.75, 
-              linewidth=.75)
+              alpha=1, 
+              linewidth=1)
 
         # Desenhar linha branca por cima
         g.map(sns.kdeplot, "valor", 
               clip_on=False, 
               color="w", 
-              lw=.75, 
+              lw=1, 
               bw_adjust=bw_adjust_val)
 
         # Linha de referência em y=0
-        g.refline(y=0, linewidth=.5, linestyle="-", color=None, clip_on=False)
+        g.refline(y=0, linewidth=1, linestyle="-", color=None, clip_on=False)
 
         # Função para labels com média
         def label(x, color, label):
@@ -301,12 +301,12 @@ if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
                    ha="left", 
                    va="center", 
                    transform=ax.transAxes,
-                   fontsize=11)
+                   fontsize=8)
 
         g.map(label, "valor")
 
         # Ajustar sobreposição
-        g.figure.subplots_adjust(hspace=-.5)
+        g.figure.subplots_adjust(hspace=-.25)
 
         # Limpar eixos
         g.set_titles("")
