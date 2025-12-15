@@ -279,12 +279,12 @@ if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
         # Desenhar linha branca por cima
         g.map(sns.kdeplot, "valor", 
               clip_on=False, 
-              color="b", 
+              color="k", 
               lw=.5, 
               bw_adjust=bw_adjust_val)
 
         # Linha de referência em y=0
-        g.refline(y=0, linewidth=1, linestyle="-", color=None, clip_on=False)
+        g.refline(y=0, linewidth=".5", linestyle="-", color="k", clip_on=False)
 
         # Função para labels com média
         def label(x, color, label):
@@ -306,7 +306,7 @@ if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
         g.map(label, "valor")
 
         # Ajustar sobreposição
-        g.figure.subplots_adjust(hspace=-.25)
+        g.figure.subplots_adjust(hspace=-1)
 
         # Limpar eixos
         g.set_titles("")
@@ -315,7 +315,7 @@ if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
 
         # Adicionar título e label do eixo X
         g.figure.suptitle(f'Distribuição de {var_ridge} por Estado', 
-                         fontsize=16, fontweight='bold', y=0.98)
+                         fontsize=8, fontweight='bold', y=1)
         g.set_axis_labels(var_ridge, "")
 
         # Ajustar layout
