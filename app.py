@@ -264,7 +264,7 @@ if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
             row="Estado_ord", 
             hue="Estado_ord", 
             aspect=15, 
-            height=0.5, 
+            height=0.75, 
             palette=pal
         )
 
@@ -306,7 +306,7 @@ if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
         g.map(label, "valor")
 
         # Ajustar sobreposição
-        g.figure.subplots_adjust(hspace=-1)
+        g.figure.subplots_adjust(hspace=-3)
 
         # Limpar eixos
         g.set_titles("")
