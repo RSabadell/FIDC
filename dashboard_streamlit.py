@@ -126,7 +126,7 @@ fig, ax = plt.subplots(figsize=(12, 6))
 for categoria in df_filtered[segmentar_por].dropna().unique():
     dados = df_filtered[df_filtered[segmentar_por] == categoria][var_principal].dropna()
     if len(dados) > 5:
-        sns.kdeplot(dados, label=str(categoria), fill=True, alpha=0.3, ax=ax)
+        sns.kdeplot(dados, label=str(categoria), alpha=0.3, ax=ax)
 
 ax.set_xlabel(var_principal, fontsize=12)
 ax.set_ylabel('Densidade', fontsize=12)
