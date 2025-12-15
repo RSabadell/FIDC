@@ -273,8 +273,8 @@ if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
               bw_adjust=bw_adjust_val, 
               clip_on=False,
               fill=True, 
-              alpha=1, 
-              linewidth=1.5)
+              alpha=.5, 
+              linewidth=.5)
 
         # Desenhar linha branca por cima
         g.map(sns.kdeplot, "valor", 
