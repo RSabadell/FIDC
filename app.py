@@ -180,20 +180,20 @@ with c4:
     else:
         st.metric("Valor Total", "N/A")
 
-# ===================== RIDGE PLOT COM SEABORN =====================
+# ===================== RIDGE PLOT COM FACETGRID (JOYPLOT) =====================
 
-st.header("🏔️ Ridge Plot - Distribuição por Estado (Seaborn)")
+st.header("🏔️ Ridge Plot - Estilo JoyPlot (FacetGrid)")
 
-st.info("💡 Estados ordenados por valor médio. Ridge plot feito com seaborn nativo.")
+st.info("💡 Gráfico de densidade sobreposta no estilo clássico. Estados ordenados por média.")
 
 if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
 
     # Configurações
-    col_ridge1, col_ridge2, col_ridge3 = st.columns(3)
+    col_ridge1, col_ridge2, col_ridge3, col_ridge4 = st.columns(4)
 
     with col_ridge1:
         min_obs_ridge = st.slider(
-            "Mínimo de observações por estado",
+            "Mínimo de observações",
             min_value=10,
             max_value=100,
             value=30,
@@ -202,18 +202,27 @@ if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
 
     with col_ridge2:
         var_ridge = st.selectbox(
-            "Variável para Ridge Plot",
+            "Variável",
             ["Score SERASA", "Idade", "Valor Financiado"],
         )
 
     with col_ridge3:
-        estilo_seaborn = st.selectbox(
-            "Estilo Seaborn",
-            ["whitegrid", "darkgrid", "white", "dark", "ticks"],
+        paleta_ridge = st.selectbox(
+            "Paleta de cores",
+            ["cubehelix", "rocket", "mako", "viridis", "RdYlGn", "coolwarm"],
+        )
+
+    with col_ridge4:
+        bw_adjust_val = st.slider(
+            "Suavização (bw_adjust)",
+            min_value=0.3,
+            max_value=2.0,
+            value=0.8,
+            step=0.1,
         )
 
     # Preparar dados
-    df_ridge = df_filt[['Estado', var_ridge]].dropna()
+    df_ridge = df_filt[['Estado', var_ridge]].dropna().copy()
 
     # Filtrar estados com amostra mínima
     estados_contagem = df_ridge.groupby('Estado')[var_ridge].count()
@@ -221,87 +230,106 @@ if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
     df_ridge = df_ridge[df_ridge['Estado'].isin(estados_validos)]
 
     if len(estados_validos) < 3:
-        st.warning(f"⚠️ Apenas {len(estados_validos)} estado(s) com mínimo de {min_obs_ridge} observações.")
+        st.warning(f"⚠️ Apenas {len(estados_validos)} estado(s) disponível(is). Reduza o mínimo de observações.")
     else:
         # Calcular média por estado e ordenar
         score_medio = df_ridge.groupby('Estado')[var_ridge].mean().sort_values()
         ordem_estados = score_medio.index.tolist()
         n_estados = len(ordem_estados)
 
-        # Adicionar coluna de ordem para plotar
-        df_ridge['ordem'] = df_ridge['Estado'].map({estado: i for i, estado in enumerate(ordem_estados)})
+        # Criar coluna ordenada como categoria
+        df_ridge['Estado_ord'] = pd.Categorical(
+            df_ridge['Estado'],
+            categories=ordem_estados,
+            ordered=True
+        )
 
-        # Criar paleta de cores gradiente
-        palette = sns.color_palette("RdYlGn", n_colors=n_estados)
-        color_dict = {estado: palette[i] for i, estado in enumerate(ordem_estados)}
+        # Renomear variável para facilitar
+        df_ridge['valor'] = df_ridge[var_ridge]
 
-        # Configurar estilo seaborn
-        sns.set_style(estilo_seaborn)
+        # Configurar tema seaborn
+        sns.set_theme(style="white", rc={"axes.facecolor": (0, 0, 0, 0)})
 
-        # Criar figura
-        fig, axes = plt.subplots(n_estados, 1, figsize=(12, n_estados * 0.6), sharex=True)
+        # Criar paleta
+        if paleta_ridge == "cubehelix":
+            pal = sns.cubehelix_palette(n_estados, rot=-.25, light=.7)
+        elif paleta_ridge == "RdYlGn":
+            pal = sns.color_palette("RdYlGn", n_estados)
+        else:
+            pal = sns.color_palette(paleta_ridge, n_estados)
 
-        # Se só tiver 1 estado, axes não será array
-        if n_estados == 1:
-            axes = [axes]
+        # Criar FacetGrid
+        g = sns.FacetGrid(
+            df_ridge, 
+            row="Estado_ord", 
+            hue="Estado_ord", 
+            aspect=15, 
+            height=0.5, 
+            palette=pal
+        )
 
-        # Plotar cada estado
-        for i, (ax, estado) in enumerate(zip(axes, ordem_estados)):
-            dados = df_ridge[df_ridge['Estado'] == estado][var_ridge]
+        # Desenhar as densidades (preenchida)
+        g.map(sns.kdeplot, "valor",
+              bw_adjust=bw_adjust_val, 
+              clip_on=False,
+              fill=True, 
+              alpha=1, 
+              linewidth=1.5)
 
-            # Usar seaborn kdeplot
-            sns.kdeplot(
-                data=dados,
-                ax=ax,
-                fill=True,
-                color=color_dict[estado],
-                alpha=0.7,
-                linewidth=1.5,
-                bw_adjust=0.8
-            )
+        # Desenhar linha branca por cima
+        g.map(sns.kdeplot, "valor", 
+              clip_on=False, 
+              color="w", 
+              lw=2, 
+              bw_adjust=bw_adjust_val)
 
-            # Configurar eixo
-            ax.set_ylabel('')
-            ax.set_yticks([])
+        # Linha de referência em y=0
+        g.refline(y=0, linewidth=2, linestyle="-", color=None, clip_on=False)
 
-            # Label do estado e média à esquerda
-            media = dados.mean()
-            ax.text(
-                0.02, 0.5, f'{estado}  ({media:.0f})',
-                transform=ax.transAxes,
-                va='center',
-                fontsize=10,
-                weight='bold'
-            )
+        # Função para labels com média
+        def label(x, color, label):
+            ax = plt.gca()
+            # Calcular média do estado atual
+            estado_atual = label.iloc[0] if hasattr(label, 'iloc') else str(label)
+            media = df_ridge[df_ridge['Estado_ord'] == estado_atual]['valor'].mean()
 
-            # Remover spines desnecessários
-            ax.spines['left'].set_visible(False)
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
+            # Label com estado e média
+            texto = f"{estado_atual}  ({media:.0f})"
+            ax.text(0, .2, texto, 
+                   fontweight="bold", 
+                   color=color,
+                   ha="left", 
+                   va="center", 
+                   transform=ax.transAxes,
+                   fontsize=11)
 
-            # Só mostrar xlabel no último
-            if i < n_estados - 1:
-                ax.set_xlabel('')
-                ax.spines['bottom'].set_visible(False)
-                ax.tick_params(bottom=False)
+        g.map(label, "valor")
 
-        # Configurar último eixo
-        axes[-1].set_xlabel(var_ridge, fontsize=12, weight='bold')
-        axes[-1].spines['bottom'].set_visible(True)
+        # Ajustar sobreposição
+        g.figure.subplots_adjust(hspace=-.5)
 
-        # Título
-        fig.suptitle(f'Distribuição de {var_ridge} por Estado (ordenado por média)', 
-                    fontsize=14, weight='bold', y=0.995)
+        # Limpar eixos
+        g.set_titles("")
+        g.set(yticks=[], ylabel="")
+        g.despine(bottom=True, left=True)
 
+        # Adicionar título e label do eixo X
+        g.figure.suptitle(f'Distribuição de {var_ridge} por Estado', 
+                         fontsize=16, fontweight='bold', y=0.98)
+        g.set_axis_labels(var_ridge, "")
+
+        # Ajustar layout
         plt.tight_layout()
-        st.pyplot(fig)
 
-        # Resetar estilo
-        sns.set_style("white")
+        # Mostrar no streamlit
+        st.pyplot(g.figure)
+
+        # Resetar tema
+        sns.set_theme()
 
         # Estatísticas
         with st.expander("📊 Estatísticas por Estado"):
-            stats_estado = df_ridge.groupby('Estado')[var_ridge].agg([
+            stats_estado = df_ridge.groupby('Estado')['valor'].agg([
                 'count', 'mean', 'median', 'std', 'min', 'max'
             ]).round(2)
             stats_estado.columns = ['Contagem', 'Média', 'Mediana', 'Desvio Padrão', 'Mínimo', 'Máximo']
@@ -309,7 +337,7 @@ if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
             st.dataframe(stats_estado, use_container_width=True)
 
 else:
-    st.warning("⚠️ Colunas 'Estado' e variável selecionada necessárias para Ridge Plot")
+    st.warning("⚠️ Colunas necessárias não encontradas para Ridge Plot")
 
 # ===================== KDE CONFIGURÁVEL =====================
 
