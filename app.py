@@ -5,8 +5,6 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy import stats
-from scipy.stats import gaussian_kde
-from matplotlib.colors import LinearSegmentedColormap
 
 # Configuração básica da página
 st.set_page_config(
@@ -182,15 +180,15 @@ with c4:
     else:
         st.metric("Valor Total", "N/A")
 
-# ===================== RIDGE PLOT POR ESTADO =====================
+# ===================== RIDGE PLOT COM SEABORN =====================
 
-st.header("🏔️ Ridge Plot - Distribuição de Score por Estado")
+st.header("🏔️ Ridge Plot - Distribuição por Estado (Seaborn)")
 
-st.info("💡 Estados ordenados por score médio. Cores indicam performance: vermelho (baixo) → verde (alto)")
+st.info("💡 Estados ordenados por valor médio. Ridge plot feito com seaborn nativo.")
 
 if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
 
-    # Configurações do ridge plot
+    # Configurações
     col_ridge1, col_ridge2, col_ridge3 = st.columns(3)
 
     with col_ridge1:
@@ -200,21 +198,18 @@ if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
             max_value=100,
             value=30,
             step=10,
-            help="Estados com menos observações serão excluídos"
         )
 
     with col_ridge2:
         var_ridge = st.selectbox(
             "Variável para Ridge Plot",
             ["Score SERASA", "Idade", "Valor Financiado"],
-            help="Escolha qual variável analisar por estado"
         )
 
     with col_ridge3:
-        tema_ridge = st.selectbox(
-            "Tema de cores",
-            ["Gradiente Performance", "Fundo Escuro", "Seaborn"],
-            help="Estilo visual do gráfico"
+        estilo_seaborn = st.selectbox(
+            "Estilo Seaborn",
+            ["whitegrid", "darkgrid", "white", "dark", "ticks"],
         )
 
     # Preparar dados
@@ -223,125 +218,98 @@ if 'Estado' in df_filt.columns and 'Score SERASA' in df_filt.columns:
     # Filtrar estados com amostra mínima
     estados_contagem = df_ridge.groupby('Estado')[var_ridge].count()
     estados_validos = estados_contagem[estados_contagem >= min_obs_ridge].index
-
     df_ridge = df_ridge[df_ridge['Estado'].isin(estados_validos)]
 
     if len(estados_validos) < 3:
-        st.warning(f"⚠️ Apenas {len(estados_validos)} estado(s) com mínimo de {min_obs_ridge} observações. Reduza o mínimo.")
+        st.warning(f"⚠️ Apenas {len(estados_validos)} estado(s) com mínimo de {min_obs_ridge} observações.")
     else:
         # Calcular média por estado e ordenar
         score_medio = df_ridge.groupby('Estado')[var_ridge].mean().sort_values()
-        ordem_estados = score_medio.index
+        ordem_estados = score_medio.index.tolist()
         n_estados = len(ordem_estados)
 
-        # Normalizar valores se for Score (0-10 scale)
-        if var_ridge == "Score SERASA":
-            df_ridge['Valor_norm'] = df_ridge[var_ridge] / 100.0
-            x_label = f'{var_ridge} (0-10)'
-            x_max = 10
-        else:
-            df_ridge['Valor_norm'] = df_ridge[var_ridge]
-            x_label = var_ridge
-            x_max = df_ridge['Valor_norm'].max()
+        # Adicionar coluna de ordem para plotar
+        df_ridge['ordem'] = df_ridge['Estado'].map({estado: i for i, estado in enumerate(ordem_estados)})
+
+        # Criar paleta de cores gradiente
+        palette = sns.color_palette("RdYlGn", n_colors=n_estados)
+        color_dict = {estado: palette[i] for i, estado in enumerate(ordem_estados)}
+
+        # Configurar estilo seaborn
+        sns.set_style(estilo_seaborn)
 
         # Criar figura
-        if tema_ridge == "Fundo Escuro":
-            fig_ridge, ax_ridge = plt.subplots(figsize=(12, max(8, n_estados * 0.4)))
-            fig_ridge.patch.set_facecolor('#1a1a1a')
-            ax_ridge.set_facecolor('#1a1a1a')
-            text_color = 'white'
-            grid_color = 'white'
-            grid_alpha = 0.15
-        else:
-            fig_ridge, ax_ridge = plt.subplots(figsize=(12, max(8, n_estados * 0.4)))
-            fig_ridge.patch.set_facecolor('white')
-            ax_ridge.set_facecolor('white')
-            text_color = 'black'
-            grid_color = 'gray'
-            grid_alpha = 0.3
+        fig, axes = plt.subplots(n_estados, 1, figsize=(12, n_estados * 0.6), sharex=True)
 
-        # Gradiente de cores
-        if tema_ridge == "Seaborn":
-            cores = sns.color_palette("husl", n_estados)
-        else:
-            colors_list = ['#8B0000', '#CD5C5C', '#FF6347', '#FF8C00', '#FFA500', 
-                          '#FFD700', '#FFFF00', '#ADFF2F', '#7FFF00', '#00FF00', '#228B22']
-            cmap = LinearSegmentedColormap.from_list('score_gradient', colors_list, N=n_estados)
-            cores = [cmap(i/n_estados) for i in range(n_estados)]
-
-        # Grid
-        x_range = np.linspace(0, x_max, 500)
-        spacing = 0.8
+        # Se só tiver 1 estado, axes não será array
+        if n_estados == 1:
+            axes = [axes]
 
         # Plotar cada estado
-        for i, (estado, cor) in enumerate(zip(ordem_estados, cores)):
-            dados = df_ridge.loc[df_ridge['Estado'] == estado, 'Valor_norm'].dropna()
+        for i, (ax, estado) in enumerate(zip(axes, ordem_estados)):
+            dados = df_ridge[df_ridge['Estado'] == estado][var_ridge]
 
-            if len(dados) < 5:
-                continue
+            # Usar seaborn kdeplot
+            sns.kdeplot(
+                data=dados,
+                ax=ax,
+                fill=True,
+                color=color_dict[estado],
+                alpha=0.7,
+                linewidth=1.5,
+                bw_adjust=0.8
+            )
 
-            # Calcular KDE
-            try:
-                kde = gaussian_kde(dados, bw_method=0.15)
-                density = kde(x_range)
-                density = density / density.max() * 0.7  # Normalizar altura
-            except:
-                continue
+            # Configurar eixo
+            ax.set_ylabel('')
+            ax.set_yticks([])
 
-            y_base = i * spacing
+            # Label do estado e média à esquerda
+            media = dados.mean()
+            ax.text(
+                0.02, 0.5, f'{estado}  ({media:.0f})',
+                transform=ax.transAxes,
+                va='center',
+                fontsize=10,
+                weight='bold'
+            )
 
-            # Plotar ridge
-            ax_ridge.fill_between(x_range, y_base, y_base + density, 
-                                 color=cor, alpha=0.85, linewidth=0.5, 
-                                 edgecolor=text_color if tema_ridge == "Fundo Escuro" else 'black')
+            # Remover spines desnecessários
+            ax.spines['left'].set_visible(False)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
 
-            ax_ridge.plot(x_range, y_base + density, color=text_color, 
-                         linewidth=0.3, alpha=0.6)
+            # Só mostrar xlabel no último
+            if i < n_estados - 1:
+                ax.set_xlabel('')
+                ax.spines['bottom'].set_visible(False)
+                ax.tick_params(bottom=False)
 
-            # Labels
-            media_estado = dados.mean() * (100 if var_ridge == "Score SERASA" else 1)
-            ax_ridge.text(-0.3, y_base + 0.35, f'{estado}', 
-                        va='center', ha='right', fontsize=9, 
-                        color=text_color, weight='bold')
-            ax_ridge.text(x_max + 0.3, y_base + 0.35, f'{media_estado:.0f}', 
-                        va='center', ha='left', fontsize=8, color=text_color)
+        # Configurar último eixo
+        axes[-1].set_xlabel(var_ridge, fontsize=12, weight='bold')
+        axes[-1].spines['bottom'].set_visible(True)
 
-        # Configurar eixos
-        ax_ridge.set_xlim(-0.5, x_max + 0.5)
-        ax_ridge.set_ylim(-0.5, n_estados * spacing)
-
-        # Grid vertical
-        if var_ridge == "Score SERASA":
-            for x in range(11):
-                ax_ridge.axvline(x, color=grid_color, alpha=grid_alpha, 
-                               linewidth=0.5, linestyle='-')
-            ax_ridge.set_xticks(range(11))
-        else:
-            ax_ridge.grid(axis='x', alpha=grid_alpha)
-
-        ax_ridge.set_xlabel(x_label, fontsize=11, color=text_color, weight='bold')
-        ax_ridge.set_xticklabels(ax_ridge.get_xticks(), color=text_color, fontsize=9)
-        ax_ridge.set_yticks([])
-
-        for spine in ax_ridge.spines.values():
-            spine.set_visible(False)
-
-        ax_ridge.text(x_max/2, n_estados * spacing + 0.5, 
-                    f'Distribuição de {var_ridge} por Estado', 
-                    ha='center', fontsize=14, color=text_color, weight='bold')
+        # Título
+        fig.suptitle(f'Distribuição de {var_ridge} por Estado (ordenado por média)', 
+                    fontsize=14, weight='bold', y=0.995)
 
         plt.tight_layout()
-        st.pyplot(fig_ridge)
+        st.pyplot(fig)
+
+        # Resetar estilo
+        sns.set_style("white")
 
         # Estatísticas
         with st.expander("📊 Estatísticas por Estado"):
-            stats_estado = df_ridge.groupby('Estado')[var_ridge].agg(['count', 'mean', 'median', 'std']).round(2)
-            stats_estado.columns = ['Contagem', 'Média', 'Mediana', 'Desvio Padrão']
+            stats_estado = df_ridge.groupby('Estado')[var_ridge].agg([
+                'count', 'mean', 'median', 'std', 'min', 'max'
+            ]).round(2)
+            stats_estado.columns = ['Contagem', 'Média', 'Mediana', 'Desvio Padrão', 'Mínimo', 'Máximo']
             stats_estado = stats_estado.sort_values('Média', ascending=False)
             st.dataframe(stats_estado, use_container_width=True)
 
 else:
-    st.warning("⚠️ Colunas 'Estado' e 'Score SERASA' necessárias para Ridge Plot")
+    st.warning("⚠️ Colunas 'Estado' e variável selecionada necessárias para Ridge Plot")
 
 # ===================== KDE CONFIGURÁVEL =====================
 
@@ -368,12 +336,14 @@ else:
         var_x = st.selectbox(
             "Variável contínua para o eixo X",
             variaveis_disponiveis,
+            key='kde_var'
         )
 
     with cr:
         hue = st.selectbox(
             "Segmentar por (hue)",
             segmentacoes_disponiveis,
+            key='kde_hue'
         )
 
     col_norm1, col_norm2 = st.columns([2, 1])
@@ -381,7 +351,6 @@ else:
         normalizar = st.checkbox(
             "Normalizar curvas (cada curva com área = 1)", 
             value=False,
-            help="Quando desmarcado, mantém as proporções reais entre categorias"
         )
 
     with col_norm2:
@@ -400,7 +369,7 @@ else:
             categorias_plotadas += 1
             if normalizar:
                 sns.kdeplot(
-                    serie,
+                    data=serie,
                     label=f"{cat} (n={len(serie)})",
                     fill=True,
                     alpha=0.25,
@@ -417,10 +386,10 @@ else:
                     ax.plot(x_range, frequency, label=f"{cat} (n={len(serie)})", linewidth=1.5)
                     ax.fill_between(x_range, frequency, alpha=0.25)
                 except:
-                    st.warning(f"⚠️ Não foi possível calcular KDE para: {cat}")
+                    st.warning(f"⚠️ Erro ao calcular KDE para: {cat}")
 
     if categorias_plotadas == 0:
-        st.warning("⚠️ Nenhuma categoria com dados suficientes (mínimo 5 observações)")
+        st.warning("⚠️ Nenhuma categoria com dados suficientes")
     else:
         ax.set_xlabel(var_x, fontsize=11)
         ax.set_ylabel('Frequência aproximada' if not normalizar else 'Densidade', fontsize=11)
@@ -428,7 +397,7 @@ else:
         ax.grid(alpha=0.3)
         st.pyplot(fig)
 
-    with st.expander("📊 Ver contagem de observações por categoria"):
+    with st.expander("📊 Ver contagem por categoria"):
         counts = df_filt[hue].value_counts().sort_index()
         st.dataframe(counts.to_frame('Contagem'))
 
@@ -447,7 +416,7 @@ with col1:
             serie = df_filt.loc[df_filt["Status"] == s, "Score SERASA"].dropna()
             if len(serie) > 5:
                 if normalizar:
-                    sns.kdeplot(serie, label=f"{s} (n={len(serie)})", 
+                    sns.kdeplot(data=serie, label=f"{s} (n={len(serie)})", 
                                fill=True, alpha=0.25, ax=ax1)
                 else:
                     kde = stats.gaussian_kde(serie)
@@ -472,7 +441,7 @@ with col2:
             serie = df_filt.loc[df_filt["Perfil_Risco"] == p, "Idade"].dropna()
             if len(serie) > 5:
                 if normalizar:
-                    sns.kdeplot(serie, label=f"{p} (n={len(serie)})", 
+                    sns.kdeplot(data=serie, label=f"{p} (n={len(serie)})", 
                                fill=True, alpha=0.25, ax=ax2)
                 else:
                     kde = stats.gaussian_kde(serie)
